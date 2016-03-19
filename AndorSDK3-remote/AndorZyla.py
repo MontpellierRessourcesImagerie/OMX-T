@@ -62,7 +62,7 @@ class DataThread(threading.Thread):
 
         ## Loop back to parent to be able to communicate with it.
         self.parent = parent
-        
+
         ## A memoryHandler ob
 
         ## Image dimensions, which we need for when we retrieve image
@@ -86,7 +86,7 @@ class DataThread(threading.Thread):
         self.offsetImage = None
 
 
-    ## Pull images from self.imageQueue and send them to the client.   
+    ## Pull images from self.imageQueue and send them to the client.
     def run(self):
         count = 0
         gTime = None
@@ -184,7 +184,7 @@ class AndorBase(SDK3Camera):
 #                 (144,128,1017,1225)]
 
     def __init__(self, camNum):
-        #define properties
+        # define properties
         self.CameraAcquiring = ATBool() # Returns whether or not an acquisition is currently acquiring.
         self.SensorCooling = ATBool() # Configures the state of the sensor cooling. Cooling is disabled by default at power up and must be enabled for the camera to achieve its target temperature. The actual target temperature can be set with the TemperatureControl feature where available.
 
@@ -224,64 +224,140 @@ class AndorBase(SDK3Camera):
         self.SensorTemperature = ATFloat() # Read the current temperature of the sensor.
 
         SDK3Camera.__init__(self,camNum)
-        
+
         #end auto properties
 
 #         self.camLock = threading.Lock()
 
-#         self.buffersToQueue = Queue.Queue()        
+#         self.buffersToQueue = Queue.Queue()
 #         self.queuedBuffers = Queue.Queue()
 #         self.fullBuffers = Queue.Queue()
-#         
+#
 #         self.nQueued = 0
 #         self.nFull = 0
-#         
+#
 #         self.nBuffers = 100
 #         self.defBuffers = 100
-#        
-#         
+#
+#
 #         self.contMode = True
 #         self.burstMode = False
-#         
+#
 #         self._temp = 0
 #         self._frameRate = 0
-#         
+#
 #         self.active = True
 #         #register as a provider of metadata
 #         MetaDataHandler.provideStartMetadata.append(self.GenStartMetadata)
 
     def Init(self):
-        SDK3Camera.Init(self)        
+        SDK3Camera.Init(self)
 
         # cache some properties that we have to access regularly.
-         
+
         self.CCDWidth = self.SensorWidth.getValue()
         self.CCDHeight = self.SensorHeight.getValue()
-         
+
         self.width = self.AOIWidth.getValue()
         self.height = self.AOIHeight.getValue()
-        
+
         self.SensorCooling.setValue(True)
-        
+        self.setCrop([512, 512])
+
+
+        # Print some of the camera infos
+
+        print('Camera serial number: ' + self.getSerialNumber())
+        print('CCD sensor shape: ' + str(self.width) + 'x' + str(self.height)
+        print('Pixel encoding: ' + self.PixelEncoding.getString())
+        print('Shutter mode: ' + str(self.getElectronicShutteringMode()))
+        print('Fan speed: ' + self.FanSpeed.getString())
+        print('Sensor cooling: ' + str(self.SensorCooling.getValue()))
+        print('Sensor temperature: ' + str(self.SensorTemperature.getValue()))
+
+        # Create a memoryHandler instance to manage the camera buffers
+
+        self.memoryHandler = memoryHandler.MemoryHandler(self, self.handle)
+
+        # Create a DataThread instance to manage the images transfer to the client
+
+        self.dataThread = DataThread(self, self.width, self.height)
+
+        self.dataThread.start())
+
+    ## Some methods to manage data transfer
+    def receiveClient(self, uri):
+        '''
+        Get told who we should be sending image data to, and how we
+        should mark ourselves when we do.
+        '''
+        print('Receiving new client ' + str(uri))
+        if uri is None:
+            self.dataThread.setClient(None)
+            self.dataThread.shouldSendImages = False
+        else:
+            connection = Pyro4.Proxy(uri)
+            connection._pyroTimeout = 5
+            self.dataThread.setClient(connection)
+            self.dataThread.shouldSendImages = True
+
+    def goSilent(self):
+        '''
+        Stop sending images to the client, even if we still
+        receive them.
+        '''
+        print "Switching to quiet mode"
+        self.dataThread.shouldSendImages = False
+
+    def goLoud(self):
+        '''
+        Start sending new images to the client again.
+        '''
+        print "Switching to loud mode"
+        self.dataThread.shouldSendImages = True
+
+    def getImages(self, numImages):
+        '''
+        Retrieve the specified number of images. This may fail
+        if we ask for more images than we have, so the caller
+        should be prepared to catch exceptions.
+        '''
+        result = []
+        for i in xrange(numImages):
+            image = self.extractOneImage()
+            result.append(image)
+        return result
+
+    def discardImages(self, numImages = None):
+        '''
+        Discard the specified number of images from the queue,
+        defaulting to all of them.
+        '''
+        count = 0 # TODO: try to get this better through a queus.isempty
+        while count != numImages:
+            try:
+                self.extractOneImage()
+                count += 1
+            except Exception, e:
+                # Got an exception, probably because the
+                # queue is empty, so we're all done here.
+                return
+
+
         #set some initial parameters
         #self.FrameCount.setValue(1)
 #         self.CycleMode.setString(u'Continuous')
-#         
-#         self.SimplePreAmpGainControl.setString(u'12-bit (low noise)')
-#         self.PixelEncoding.setString('Mono12Packed')
-#         self.SensorCooling.setValue(True)
-        #self.TemperatureControl.setString('-30.00')
-        #self.PixelReadoutRate.setIndex(1)
+#
 
-        #set up polling thread        
+        #set up polling thread
 #         self.doPoll = False
 #         self.pollLoopActive = True
 #         self.pollThread = threading.Thread(target = self._pollLoop)
 #         self.pollThread.start()
-#         
+#
 
 
-    #Neo buffer helper functions    
+    #Neo buffer helper functions
 
 #     def InitBuffers(self):
 #         self._flush()
@@ -293,38 +369,38 @@ class AndorBase(SDK3Camera):
 #             #buf = np.empty(bufSize, 'uint8')
 #             buf = create_aligned_array(bufSize, 'uint8')
 #             self._queueBuffer(buf)
-#             
+#
 #         self.doPoll = True
-#             
+#
 #     def _flush(self):
 #         self.doPoll = False
 #         #purge camera buffers
 #         SDK3.Flush(self.handle)
-#         
+#
 #         #purge our local queues
 #         while not self.queuedBuffers.empty():
 #             self.queuedBuffers.get()
-#             
+#
 #         while not self.buffersToQueue.empty():
 #             self.buffersToQueue.get()
-#             
+#
 #         self.nQueued = 0
-#             
+#
 #         while not self.fullBuffers.empty():
 #             self.fullBuffers.get()
-#             
+#
 #         self.nFull = 0
 #         #purge camera buffers
 #         SDK3.Flush(self.handle)
-#             
-#             
+#
+#
 #     def _queueBuffer(self, buf):
 #         #self.queuedBuffers.put(buf)
 #         #print np.base_repr(buf.ctypes.data, 16)
 #         #SDK3.QueueBuffer(self.handle, buf.ctypes.data_as(SDK3.POINTER(SDK3.AT_U8)), buf.nbytes)
 #         #self.nQueued += 1
 #         self.buffersToQueue.put(buf)
-#         
+#
 #     def _queueBuffers(self):
 #         #self.camLock.acquire()
 #         while not self.buffersToQueue.empty():
@@ -335,7 +411,7 @@ class AndorBase(SDK3Camera):
 #             #self.fLog.write('%f\tq\n' % time.time())
 #             self.nQueued += 1
 #         #self.camLock.release()
-#         
+#
 #     def _pollBuffer(self):
 #         try:
 #             #self.fLog.write('%f\tp\n' % time.time())
@@ -353,7 +429,7 @@ class AndorBase(SDK3Camera):
 #             if not e.errNo == SDK3.AT_ERR_NODATA:
 #                 traceback.print_exc()
 #             return
-#             
+#
 #         #self.camLock.acquire()
 #         buf = self.queuedBuffers.get()
 #         self.nQueued -= 1
@@ -362,11 +438,11 @@ class AndorBase(SDK3Camera):
 #             #self.camLock.release()
 #             raise RuntimeError('Returned buffer not equal to expected buffer')
 #             #print 'Returned buffer not equal to expected buffer'
-#             
+#
 #         self.fullBuffers.put(buf)
 #         self.nFull += 1
 #         #self.camLock.release()
-#         
+#
 #     def _pollLoop(self):
 #         #self.fLog = open('poll.txt', 'w')
 #         while self.pollLoopActive:
@@ -379,55 +455,62 @@ class AndorBase(SDK3Camera):
 #             time.sleep(.0005)
 #             #self.fLog.flush()
 #         #self.fLog.close()
-#         
+#
 #     #PYME Camera interface functions - make this look like the other cameras
 #     def ExpReady(self):
 #         #self._pollBuffer()
-#         
+#
 #         return not self.fullBuffers.empty()
-#         
+#
 #     def ExtractColor(self, chSlice, mode):
 #         #grab our buffer from the full buffers list
 #         buf = self.fullBuffers.get()
 #         self.nFull -= 1
-#         
-#         #copy to the current 'active frame' 
+#
+#         #copy to the current 'active frame'
 #         #print chSlice.shape, buf.view(chSlice.dtype).shape
 #         #bv = buf.view(chSlice.dtype).reshape(chSlice.shape)
 #         xs, ys = chSlice.shape[:2]
-#         
+#
 #         a_s = self.AOIStride.getValue()
-#         
+#
 #         #print buf.nbytes
 #         #bv = buf.view(chSlice.dtype).reshape([-1, ys], order='F')
-#         
+#
 # #        bv = np.ndarray(shape=[xs,ys], dtype='uint16', strides=[2, a_s], buffer=buf)
 # #        chSlice[:] = bv
-#         
+#
 #         #chSlice[:,:] = bv
 #         #ctypes.cdll.msvcrt.memcpy(chSlice.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)), buf.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)), chSlice.nbytes)
 #         #ctypes.cdll.msvcrt.memcpy(chSlice.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)), buf.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)), chSlice.nbytes)
 #         #print 'f'
-#         
+#
 #         dt = self.PixelEncoding.getString()
-#         
+#
 #         SDK3.ConvertBuffer(buf.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)), chSlice.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)), xs, ys, a_s, dt, 'Mono16')
-#         
+#
 #         #recycle buffer
 #         self._queueBuffer(buf)
-#         
+#
+
+    def resetCam(self):
+        '''
+        Resets the camera
+        '''
+        pass # TODO: implement this
+
     def setTrigger(self, triggerMode):
         '''
         Changes the triggering mode of the camera
         '''
         self.TriggerMode.setIndex(triggerMode)
-        
+
     def getTrigger(self):
         '''
         Returns the triggering mode of the camera
         '''
         return self.TriggerMode.getIndex()
-    
+
     def setElectronicShutteringMode(self, isGlobal):
         '''
         Changes the shutter mode.0 is rolling shutter; 1 is global
@@ -451,39 +534,39 @@ class AndorBase(SDK3Camera):
         Returns the exposure time of the camera. In seconds
         '''
         return self.ExposureTime.getValue()
-    
+
     def getMinExposureTime(self):
         '''
         Returns the minimum exposure time accepted by the camera. In seconds
         '''
         return self.ExposureTime.min()
-    
+
     def setCrop(self, cropSize, binning = '1x1'):
         '''
         Changes the AOI in the camera.
-        
+
         cropSize is a tupple or list of two integers providing the size of the AOI (x, y).
         binning must be a string
         AOI will be centered in the camera
         '''
         self.AOIBinning.setString(binning)
-        
+
         # cropSize must be converted into superpixel size in case there is binning
         binningDict = {'1x1': 1, '2x2': 2, '3x3': 3, '4x4': 4, '8x8': 8}
         binnedCropSize = cropSize
         if binning != '1x1':
             binnedCropSize[0] = cropSize[0] // binningDict[binning]
             binnedCropSize[1] = cropSize[1] // binningDict[binning]
-        
+
         self.AOIWidth.setValue(binnedCropSize[0])
         self.AOILeft.setValue(((self.CCDWidth - cropSize[0]) // 2) + 1)
         self.AOIHeight.setValue(binnedCropSize[1])
         self.AOITop.setValue(((self.CCDHeight - cropSize[1]) // 2) + 1)
-        
+
         # update width and height values
         self.width = self.AOIWidth.getValue()
         self.height = self.AOIHeight.getValue()
-        
+
     def getImageShape(self):
         '''
         Returns the image size (AOI) as a tupple of two integers (x, y)
@@ -492,24 +575,35 @@ class AndorBase(SDK3Camera):
 
     def getSerialNumber(self):
         return self.SerialNumber.getValue()
-    
+
     def getCameraModel(self):
         return self.CameraModel.getValue()
 
-    def setIntegTime(self, iTime): 
+    def setIntegTime(self, iTime):
         self.ExposureTime.setValue(iTime*1e-3)
         self.FrameRate.setValue(self.FrameRate.max())
 
-    def getIntegTime(self): 
+    def getIntegTime(self):
         return self.ExposureTime.getValue()
 
     def getCycleTime(self):
         return 1.0/self.FrameRate.getValue()
 
-    def getCCDWidth(self): 
+    def setPixelReadoutRate(self, rate):
+        '''
+        Sets the PixelReadoutRate.
+        rete must be a string. For sCMOS: '280 MHz' or '100 MHz'.
+        For the SimCam: '550 MHz'
+        '''
+        self.PixelReadoutRate.setString(rate)
+
+    def getPixelEncoding(self):
+        return self.PixelEncoding.getString()
+
+    def getCCDWidth(self):
         return self.CCDWidth
-    
-    def getCCDHeight(self): 
+
+    def getCCDHeight(self):
         return self.CCDHeight
 
     def setHorizBin(self, horizontalBinning):
@@ -524,96 +618,99 @@ class AndorBase(SDK3Camera):
     def getVertBin(self):
         return self.AOIVBin.getValue()
 
-#     
-#     def getElectrTemp(*args): 
-#         return 25
-#         
     def getSensorTemperature(self):
         # for some reason querying the temperature takes a lot of time - do it less often
         return self.SensorTemperature.getValue()
-    
+
     def getTemperatureStatus(self):
         # returns the status of the temperature sensor
         return self.TemperatureStatus.getString()
 
-    def isReady(self): 
+    def isReady(self):
         return True
-    
-    def getAOIWidth(self): 
+
+    def getAOIWidth(self):
         return self.width
-    
+
     def getAOIHeight(self):
         return self.height
-         
+
+    def abort(self):
+        '''
+        Stop acquiring Images
+        '''
+        if self.CameraAcquiring.getValue():
+            self.AcquisitionStop()
+
     def Shutdown(self):
         print 'Shutting down sCMOS camera'
         self.pollLoopActive = False ## TODO: remove this
         self.shutdown()
         #pass
-# 
-#     def GetStatus(*args): 
+#
+#     def GetStatus(*args):
 #         pass
-#     
-#     def SetCOC(*args): 
+#
+#     def SetCOC(*args):
 #         pass
-# 
+#
 #     def StartExposure(self):
 #         #make sure no acquisiton is running
 #         self.StopAq()
 #         self._temp = self.SensorTemperature.getValue()
 #         self._frameRate = self.FrameRate.getValue()
-#         
+#
 #         eventLog.logEvent('StartAq', '')
 #         self._flush()
 #         self.InitBuffers()
 #         self.AcquisitionStart()
-# 
+#
 #         return 0
-#         
+#
 #     def StopAq(self):
 #         if self.CameraAcquiring.getValue():
 #             self.AcquisitionStop()
-#         
-# 
+#
+#
 #     #new fcns for Andor compatibility
 #     def GetNumImsBuffered(self):
 #         return self.nFull
-#     
+#
 #     def GetBufferSize(self):
 #         return self.nBuffers
-#         
+#
 #     def SetActive(self, active=True):
 #         '''flag the camera as active (or inactive) to dictate whether it writes it's metadata or not'''
 #         self.active = active
-# 
+#
 #     def GenStartMetadata(self, mdh):
 #         if self.active:
 #             self.GetStatus()
-#     
+#
 #             mdh.setEntry('Camera.Name', 'Andor Zyla')
-#     
+#
 #             mdh.setEntry('Camera.IntegrationTime', self.GetIntegTime())
 #             mdh.setEntry('Camera.CycleTime', self.GetCycleTime())
 #             mdh.setEntry('Camera.EMGain', 1)
-#     
+#
 #             mdh.setEntry('Camera.ROIPosX', self.GetROIX1())
 #             mdh.setEntry('Camera.ROIPosY',  self.GetROIY1())
 #             mdh.setEntry('Camera.ROIWidth', self.GetROIX2() - self.GetROIX1())
 #             mdh.setEntry('Camera.ROIHeight',  self.GetROIY2() - self.GetROIY1())
 #             #mdh.setEntry('Camera.StartCCDTemp',  self.GetCCDTemp())
-#     
+#
 #             mdh.setEntry('Camera.ReadNoise', 1)
 #             mdh.setEntry('Camera.NoiseFactor', 1)
 #             mdh.setEntry('Camera.ElectronsPerCount', .28)
 #             mdh.setEntry('Camera.ADOffset', self.Baseline.getValue())
-#     
+#
 #             #mdh.setEntry('Simulation.Fluorophores', self.fluors.fl)
 #             #mdh.setEntry('Simulation.LaserPowers', self.laserPowers)
-#     
+#
 #             #realEMGain = ccdCalibrator.CalibratedCCDGain(self.GetEMGain(), self.GetCCDTempSetPoint())
 #             #if not realEMGain == None:
 #             mdh.setEntry('Camera.TrueEMGain', 1)
-#             
+#
 #             itime = int(1000*self.GetIntegTime())
 #             calpath = nameUtils.getCalibrationDir(self.GetSerialNumber())
 #             dkfn = os.path.join(calpath, 'dark_%dms.tif'%itime)
@@ -624,25 +721,25 @@ class AndorBase(SDK3Camera):
 #             print varfn
 #             if os.path.exists(varfn):
 #                 mdh['Camera.VarianceMapID'] = varfn
-# 
+#
 #     #functions to make us look more like andor camera
 #     def GetEMGain(self):
 #         return 1
-# 
+#
 #     def GetCCDTempSetPoint(self):
 #         return self.TargetSensorTemperature.getValue()
-# 
+#
 #     def SetCCDTemp(self, temp):
 #         self.TargetSensorTemperature.setValue(temp)
 #         #pass
-# 
+#
 #     def SetEMGain(self, gain):
 #         pass
-#     
+#
 #     def SetAcquisitionMode(self, aqMode):
 #         self.CycleMode.setIndex(aqMode)
 #         self.contMode = aqMode == self.MODE_CONTINUOUS
-# 
+#
 #     def SetBurst(self, burstSize):
 #         if burstSize > 1:
 #             self.SetAcquisitionMode(self.MODE_SINGLE_SHOT)
@@ -653,26 +750,26 @@ class AndorBase(SDK3Camera):
 #             self.FrameCount.setValue(1)
 #             self.SetAcquisitionMode(self.MODE_CONTINUOUS)
 #             self.burstMode = False
-# 
+#
 #     def SetShutter(self, mode):
 #         pass
-# 
+#
 #     def SetBaselineClamp(self, mode):
 #         pass
-#     
+#
 #     def GetFPS(self):
 #         #return self.FrameRate.getValue()
 #         return self._frameRate
-#         
+#
     def __del__(self):
         self.Shutdown()
         #self.compT.kill = True
-# 
-#         
-#         
-#         
-#         
-class AndorZyla(AndorBase):              
+#
+#
+#
+#
+#
+class AndorZyla(AndorBase):
     def __init__(self, camNum):
         #define properties
 
@@ -697,14 +794,14 @@ class AndorZyla(AndorBase):
         self.RowReadTime = ATFloat() # Configures the time in seconds to read a single row.
         self.SensorReadoutMode = ATEnum() # Configures the direction in which the sensor will be read out
         self.ShutterOutputMode = ATEnum() # Controls the mode the external trigger will run in. External Shutter signal can either be set to high (open) or low (closed). ShutterOutput can be triggered by setting AuxOutSourceTwo to ExternalShutterControl
-        
+
         self.TemperatureStatus = ATEnum() # Reports the current state of cooling towards the Target Sensor Temperature. Read Only
         self.SimplePreAmpGainControl = ATEnum() # Wrapper Feature to simplify selection of the sensitivity and dynamic range options. This feature should be used as a replacement for the PreAmpGainControl feature as some of the options in the PreAmpGainControl feature are not supported on all cameras. Supported Bit Depth will be dependent on the camera
         self.BitDepth = ATEnum() # Returns the number bits used to store information about each pixel of the image. Supported Bit Depth will be dependent on the camera.
         self.MetadataEnable = ATBool() # Enable metadata. This is a global flag which will enable inclusion of metadata in the data stream as described in Section 4.5 Metadata. When this flag is enabled the data stream will always contain the MetadataFrame information. This will override the subsequent metadata settings when disabled.
         self.MetadataFrame = ATBool() # Indicates whether the MetadataFrame information is included in the data stream. This is read only and is automatically sent if metadata is enabled.
         self.MetadataTimestamp = ATBool() # Enables inclusion of timestamp information in the metadata stream. The timestamp indicates the time at which the exposure for the frame started.
-             
+
 #         self.ActualExposureTime = ATFloat()
 #         self.BurstRate = ATFloat()
         self.ReadoutTime = ATFloat() # This feature will return the time to readout data from a sensor.
@@ -713,7 +810,7 @@ class AndorZyla(AndorBase):
         self.TimestampClock = ATInt() # Reports the current value of the camera internal timestamp clock. This same clock is used to timestamp images as they are acquired when the MetadataTimestamp feature is enabled. The clock is reset to zero when the camera is powered on and then runs continuously at the frequency indicated by the TimestampClockFrequency feature. The clock is 64-bits wide.
         self.TimestampClockFrequency = ATInt() # Reports the frequency of the camera internal timestamp clock in Hz.
         self.TimestampClockReset = ATCommand() # Resets the camera internal timestamp clock to zero. As soon as the reset is complete the clock will begin incrementing from zero at the rate given by the TimestampClockFrequency feature.
-        
+
         self.AccumulateCount = ATInt() # Sets the number of images that should be summed to obtain each image in sequence.
         self.Baseline = ATInt() # Returns the baseline level of the image with current settings
 #         self.BurstCount = ATInt()
@@ -723,27 +820,63 @@ class AndorZyla(AndorBase):
         self.ControllerID = ATString() # Returns a unique identifier for the camera controller device. i.e. Frame grabber over Cameralink
         self.FirmwareVersion = ATString() # Returns the camera firmware version
 
-        
+
         AndorBase.__init__(self,camNum)
-                
+
+    def Init(self):
+        AndorBase.Init(self)
+
+        print('Bit depth: ' + str(self.BitDepth))
+        print('Temperature status: ' + self.getTemperatureStatus())
+        print('FirmwareVersion: ' + self.FirmwareVersion.getString())
+        print('Baseline level: ' + str(self.Baseline.getValue))
+
+        # Configure default camera status
+
+        self.setFanSpeed(u'Off')
+        self.setSimplePreAmpGainControl(u'16-bit (low noise & high well capacity)')
+        self.setPixelReadoutRate(u'280 MHz')
+
+
+
 
     # Define Zyla specific methods
-    
+
     def getReadoutTime(self):
         '''
         Returns the readout time in seconds as a float
         '''
         return self.ReadoutTime.getValue()
-    
-          
+
+    def setFanSpeed(self, speed):
+        '''
+        Sets the fan speed. For Zyla speed is 'On' or 'Off'
+        '''
+        self.FanSpeed.setString(speed)
+
+    def setSimplePreAmpGainControl(self, stringValue):
+        '''
+        Sets the sensitivity and dynamic range options
+        stringValue is:
+        11-bit (high well capacity)
+        12-bit (high well capacity)
+        11-bit (low noise)
+        12-bit (low noise)
+        16-bit (low noise & high well capacity)
+        '''
+        self.SimplePreAmpGainControl.setString(stringValue)
+
+
+
+
 class AndorSim(AndorBase):
     def __init__(self, camNum):
         #define properties
         self.SynchronousTriggering = ATBool() # Configures whether external triggers are synchronous with the read out of a sensor row. Asynchronous triggering may result in data corruption in the row being digitised when the triggers occurs.
-         
+
         self.PixelCorrection = ATEnum() # Configures the pixel correction to be applied.
         self.TriggerSelector = ATEnum() # Only if trigger mode in advanced
         self.TriggerSource = ATEnum()  # Only if trigger mode in advanced
-         
-         
+
+
         AndorBase.__init__(self,camNum)
