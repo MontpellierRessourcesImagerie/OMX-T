@@ -41,11 +41,28 @@ import memoryHandler
 # Needed to keep the daemon from only listening to requests originating from the local host.
 MY_IP_ADDRESS = '10.0.0.2'
 
+# CameraNumber is by default 0, the first non sumulated camera
+CAMERA_NUMBER = 0
+
 # Cropping modes
-(CROP_FULL, CROP_HALF, CROP_512, CROP_256, CROP_128) = range(5) # TODO: Change this
+croppingModes = (CROP_FULL,     # 0
+                 CROP_1024,     # 1
+                 CROP_512,      # 2
+                 CROP_256,      # 3
+                 CROP_128,      # 4
+                 CROP_ARBITRARY # 5
+                 )
+
+croppingModesSizes = {'CROP_FULL': (2048,2048), # TODO: implement this depending on camera model
+                      'CROP_1024': (1024,1024),
+                      'CROP_512': (512,512),
+                      'CROP_256': (256,256),
+                      'CROP_128': (128,128),
+                      'CROP_ARBITRARY': (2048,2048)
+                      }
 
 # Trigger modes
-(TRIGGER_INTERNAL, TRIGGER_EXTERNAL, TRIGGER_EXTERNAL_EXPOSURE) = range(3)
+(TRIGGER_INTERNAL, TRIGGER_SOFTWARE, TRIGGER_EXTERNAL, TRIGGER_EXTERNAL_START, TRIGGER_EXTERNAL_EXPOSURE) = range(5)
 
 # A black image
 STATIC_BLACK = np.zeros((512, 512), dtype = np.uint16) # TODO: verify this is used
@@ -173,16 +190,6 @@ class AndorBase(SDK3Camera):
     MODE_CONTINUOUS = 1
     MODE_SINGLE_SHOT = 0
 
-#    validROIS = [(2592, 2160,1, 1),
-#                 (2544,2160,1,25),
-#                 (2064,2048,57,265),
-#                 (1776,1760,201,409),
-#                 (1920,1080,537,337),
-#                 (1392,1040,561,601),
-#                 (528,512,825,1033),
-#                 (240,256,953,1177),
-#                 (144,128,1017,1225)]
-
     def __init__(self, camNum):
         # define properties
         self.CameraAcquiring = ATBool() # Returns whether or not an acquisition is currently acquiring.
@@ -223,7 +230,10 @@ class AndorBase(SDK3Camera):
         self.FrameRate = ATFloat() # Configures the frame rate in Hz at which each image is acquired during any acquisition sequence. This is the rate at which frames are acquired by the camera which may be different from the rate at which frames are delivered to the user. For example when AccumulateCount has a value other than 1, the apparent frame rate will decrease proportionally.
         self.SensorTemperature = ATFloat() # Read the current temperature of the sensor.
 
-        SDK3Camera.__init__(self,camNum)
+        SDK3Camera.__init__(self, camNum)
+
+        # Set the cropMode
+        self.curCropMode = 0
 
         #end auto properties
 
@@ -262,7 +272,7 @@ class AndorBase(SDK3Camera):
         self.height = self.AOIHeight.getValue()
 
         self.SensorCooling.setValue(True)
-        self.setCrop([512, 512])
+        self.setCropMode(2)
 
 
         # Print some of the camera infos
@@ -284,6 +294,33 @@ class AndorBase(SDK3Camera):
         self.dataThread = DataThread(self, self.width, self.height)
 
         self.dataThread.start())
+
+    ## Some methods to manage memory
+    def allocMemory(self, numBuffers, timeout = .5):
+        '''
+        Allocate memory to store images
+        '''
+        strides = self.getStrides()
+        imageBytes = self.ImageSizeBytes.getValue()
+        # We allocate about 500MB of RAM to the image buffer. Allocating
+        # too much memory seems to cause slowdowns and crashes, oddly enough.
+        numBuffers = (500 * 1024 * 1024) / imageBytes # TODO: Check this
+        self.memoryHandler.allocMemory(numBuffers,
+                                       imageBytes,
+                                       self.width,
+                                       self.height,
+                                       strides,
+                                       timeout
+                                       )
+
+    def getStrides(self):
+        '''
+        Returns the strides on the images array.
+        This is the bahaviour for a default SimCam and must be overridden in a
+        hardware camera.
+        '''
+        return self.width * 16 # TODO: Not sure about this
+
 
     ## Some methods to manage data transfer
     def receiveClient(self, uri):
@@ -505,6 +542,10 @@ class AndorBase(SDK3Camera):
         '''
         self.TriggerMode.setIndex(triggerMode)
 
+        # Start the acquisition with external triggers
+        if 1 < triggerMode:
+            self.AcquisitionStart()
+
     def getTrigger(self):
         '''
         Returns the triggering mode of the camera
@@ -527,7 +568,7 @@ class AndorBase(SDK3Camera):
         '''
         Changes the exposure time in the camera. In seconds
         '''
-        self.ExposureTime.setValue(time)
+        self.ExposureTime.setValue(time) # TODO: Impleent with a reset?
 
     def getExposureTime(self):
         '''
@@ -541,6 +582,18 @@ class AndorBase(SDK3Camera):
         '''
         return self.ExposureTime.min()
 
+    def setCropMode(selfself, mode):
+        '''
+        Previously setCrop. Set the cropping mode to one of a few presets.
+        In version 2 of the SDK, these were the only valid crop modes; in
+        version 3, we can set any crop mode we want, but these
+        presets are still convenient.
+        mode is an integer.
+        '''
+        self.curCropMode = mode # TODO: implement arbitrary cropMode
+        self.setCrop(croppingModesSizes[croppingModes[mode]])
+
+
     def setCrop(self, cropSize, binning = '1x1'):
         '''
         Changes the AOI in the camera.
@@ -549,8 +602,6 @@ class AndorBase(SDK3Camera):
         binning must be a string
         AOI will be centered in the camera
         '''
-        self.AOIBinning.setString(binning)
-
         # cropSize must be converted into superpixel size in case there is binning
         binningDict = {'1x1': 1, '2x2': 2, '3x3': 3, '4x4': 4, '8x8': 8}
         binnedCropSize = cropSize
@@ -558,20 +609,49 @@ class AndorBase(SDK3Camera):
             binnedCropSize[0] = cropSize[0] // binningDict[binning]
             binnedCropSize[1] = cropSize[1] // binningDict[binning]
 
-        self.AOIWidth.setValue(binnedCropSize[0])
-        self.AOILeft.setValue(((self.CCDWidth - cropSize[0]) // 2) + 1)
-        self.AOIHeight.setValue(binnedCropSize[1])
-        self.AOITop.setValue(((self.CCDHeight - cropSize[1]) // 2) + 1)
+        self.setCropArbitrary(binnedCropSize[0],
+                              ((self.CCDWidth - cropSize[0]) // 2) + 1,
+                              binnedCropSize[1],
+                              ((self.CCDHeight - cropSize[1]) // 2) + 1,
+                              binning
+                              )
+
+    def setCropArbitrary(self, width, left, height, top, binning = '1x1'):
+
+        # Set the binning
+        self.AOIBinning.setString(binning)
+
+        # Set AOI
+        self.AOIWidth.setValue(width)
+        self.AOILeft.setValue(left)
+        self.AOIHeight.setValue(heigth)
+        self.AOITop.setValue(top)
 
         # update width and height values
         self.width = self.AOIWidth.getValue()
         self.height = self.AOIHeight.getValue()
+
+    def getCropMode(self):
+        return self.curCropMode
 
     def getImageShape(self):
         '''
         Returns the image size (AOI) as a tupple of two integers (x, y)
         '''
         return (self.width, self.height)
+
+    def setOffsetCorrection(self, image):
+        '''
+        Set an offset correction image to use.
+        '''
+        self.dataThread.setOffsetCorrection(image)
+
+    def getIsOffsetCorrectionOn(self):
+        '''
+        Return true if a correction file is loaded for the current image dimensions.
+        '''
+        correction = self.dataThread.getOffsetCorrection()
+        return correction is not None and correction.shape == (self.height, self.width)
 
     def getSerialNumber(self):
         return self.SerialNumber.getValue()
@@ -764,11 +844,8 @@ class AndorBase(SDK3Camera):
     def __del__(self):
         self.Shutdown()
         #self.compT.kill = True
-#
-#
-#
-#
-#
+
+
 class AndorZyla(AndorBase):
     def __init__(self, camNum):
         #define properties
@@ -838,8 +915,6 @@ class AndorZyla(AndorBase):
         self.setPixelReadoutRate(u'280 MHz')
 
 
-
-
     # Define Zyla specific methods
 
     def getReadoutTime(self):
@@ -847,6 +922,14 @@ class AndorZyla(AndorBase):
         Returns the readout time in seconds as a float
         '''
         return self.ReadoutTime.getValue()
+
+    def getStrides(self):
+        '''
+        Returns the strides on the images array.
+        This is the bahaviour for a default SimCam and must be overridden in a
+        hardware camera.
+        '''
+        return self.AOIStride.getValue() # TODO: Not sure about this
 
     def setFanSpeed(self, speed):
         '''
@@ -867,8 +950,6 @@ class AndorZyla(AndorBase):
         self.SimplePreAmpGainControl.setString(stringValue)
 
 
-
-
 class AndorSim(AndorBase):
     def __init__(self, camNum):
         #define properties
@@ -880,3 +961,20 @@ class AndorSim(AndorBase):
 
 
         AndorBase.__init__(self,camNum)
+
+
+try:
+    cam = AndorZyla(camNum = CAMERA_NUMBER)
+    daemon = Pyro4.Daemon(port = 7000, host = MY_IP_ADDRESS)
+    Pyro4.Daemon.serveSimple(
+        {
+            cam: 'Andorcam',
+        },
+        daemon = daemon, ns = False, verbose = True
+    )
+
+except Exception, e:
+    traceback.print_exc()
+
+# Clean up after ourselves.
+# TODO: add some del's to clean up
