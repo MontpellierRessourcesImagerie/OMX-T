@@ -44,6 +44,9 @@ MY_IP_ADDRESS = '10.0.0.2'
 # CameraNumber is by default 0, the first non sumulated camera
 CAMERA_NUMBER = 0
 
+# Memory we want to allocate for the camera buffers in Mb
+MEMORY_ALLOCATION = 500
+
 # Cropping modes
 croppingModes = (CROP_FULL,     # 0
                  CROP_1024,     # 1
@@ -80,8 +83,6 @@ class DataThread(threading.Thread):
         ## Loop back to parent to be able to communicate with it.
         self.parent = parent
 
-        ## A memoryHandler ob
-
         ## Image dimensions, which we need for when we retrieve image
         # data. Our parent is responsible for updating these for us.
         self.width = self.height = 0
@@ -115,7 +116,7 @@ class DataThread(threading.Thread):
             with self.sensorLock:
                 try:
                     start = time.clock()
-                    image = memoryHandler.getImage .getImage(self.width * self.height, .5)
+                    image = self.parent.getImage()
                     getTime += (time.clock() - start)
                 except Exception, e:
                     if 'getImage failed' not in e:
@@ -157,7 +158,7 @@ class DataThread(threading.Thread):
 
     ## Fix an image -- set its shape and apply any relevant correction.
     def fixImage(self, image):
-        image.shape = self.height, self.width
+        # image.shape = self.height, self.width
         if self.offsetImage is not None and self.offsetImage.shape == image.shape:
             # Apply offset correction.
             image -= self.offsetImage
@@ -238,7 +239,7 @@ class AndorBase(SDK3Camera):
         #end auto properties
 
 #         self.camLock = threading.Lock()
-
+#
 #         self.buffersToQueue = Queue.Queue()
 #         self.queuedBuffers = Queue.Queue()
 #         self.fullBuffers = Queue.Queue()
@@ -278,8 +279,8 @@ class AndorBase(SDK3Camera):
         # Print some of the camera infos
 
         print('Camera serial number: ' + self.getSerialNumber())
-        print('CCD sensor shape: ' + str(self.width) + 'x' + str(self.height)
-        print('Pixel encoding: ' + self.PixelEncoding.getString())
+        print('CCD sensor shape: ' + str(self.width) + 'x' + str(self.height))
+        print('Pixel encoding: ' + self.getPixelEncoding())
         print('Shutter mode: ' + str(self.getElectronicShutteringMode()))
         print('Fan speed: ' + self.FanSpeed.getString())
         print('Sensor cooling: ' + str(self.SensorCooling.getValue()))
@@ -293,10 +294,10 @@ class AndorBase(SDK3Camera):
 
         self.dataThread = DataThread(self, self.width, self.height)
 
-        self.dataThread.start())
+        self.dataThread.start()
 
     ## Some methods to manage memory
-    def allocMemory(self, numBuffers, timeout = .5):
+    def allocMemory(self, timeout = .5):
         '''
         Allocate memory to store images
         '''
@@ -304,7 +305,7 @@ class AndorBase(SDK3Camera):
         imageBytes = self.ImageSizeBytes.getValue()
         # We allocate about 500MB of RAM to the image buffer. Allocating
         # too much memory seems to cause slowdowns and crashes, oddly enough.
-        numBuffers = (500 * 1024 * 1024) / imageBytes # TODO: Check this
+        numBuffers = (MEMORY_ALLOCATION * 1024 * 1024) / imageBytes
         self.memoryHandler.allocMemory(numBuffers,
                                        imageBytes,
                                        self.width,
@@ -352,8 +353,15 @@ class AndorBase(SDK3Camera):
         '''
         print "Switching to loud mode"
         self.dataThread.shouldSendImages = True
+        
+    def getImage(self, timeout = .5):
+        '''
+        get a single image wrapped around the memoryHandler getImage
+        '''
+        return self.memoryHandler.getImage(timeout)
+    
 
-    def getImages(self, numImages):
+    def getImages(self, numImages, timeout = .5):
         '''
         Retrieve the specified number of images. This may fail
         if we ask for more images than we have, so the caller
@@ -361,7 +369,7 @@ class AndorBase(SDK3Camera):
         '''
         result = []
         for i in xrange(numImages):
-            image = self.extractOneImage()
+            image = self.getImage(timeout)
             result.append(image)
         return result
 
@@ -370,10 +378,10 @@ class AndorBase(SDK3Camera):
         Discard the specified number of images from the queue,
         defaulting to all of them.
         '''
-        count = 0 # TODO: try to get this better through a queus.isempty
+        count = 0
         while count != numImages:
             try:
-                self.extractOneImage()
+                self.getImage(0)
                 count += 1
             except Exception, e:
                 # Got an exception, probably because the
@@ -385,8 +393,7 @@ class AndorBase(SDK3Camera):
         #self.FrameCount.setValue(1)
 #         self.CycleMode.setString(u'Continuous')
 #
-
-        #set up polling thread
+#         set up polling thread
 #         self.doPoll = False
 #         self.pollLoopActive = True
 #         self.pollThread = threading.Thread(target = self._pollLoop)
@@ -408,7 +415,7 @@ class AndorBase(SDK3Camera):
 #             self._queueBuffer(buf)
 #
 #         self.doPoll = True
-#
+
 #     def _flush(self):
 #         self.doPoll = False
 #         #purge camera buffers
@@ -429,15 +436,14 @@ class AndorBase(SDK3Camera):
 #         self.nFull = 0
 #         #purge camera buffers
 #         SDK3.Flush(self.handle)
-#
-#
+
 #     def _queueBuffer(self, buf):
 #         #self.queuedBuffers.put(buf)
 #         #print np.base_repr(buf.ctypes.data, 16)
 #         #SDK3.QueueBuffer(self.handle, buf.ctypes.data_as(SDK3.POINTER(SDK3.AT_U8)), buf.nbytes)
 #         #self.nQueued += 1
 #         self.buffersToQueue.put(buf)
-#
+
 #     def _queueBuffers(self):
 #         #self.camLock.acquire()
 #         while not self.buffersToQueue.empty():
@@ -448,7 +454,7 @@ class AndorBase(SDK3Camera):
 #             #self.fLog.write('%f\tq\n' % time.time())
 #             self.nQueued += 1
 #         #self.camLock.release()
-#
+
 #     def _pollBuffer(self):
 #         try:
 #             #self.fLog.write('%f\tp\n' % time.time())
@@ -479,7 +485,7 @@ class AndorBase(SDK3Camera):
 #         self.fullBuffers.put(buf)
 #         self.nFull += 1
 #         #self.camLock.release()
-#
+
 #     def _pollLoop(self):
 #         #self.fLog = open('poll.txt', 'w')
 #         while self.pollLoopActive:
@@ -492,13 +498,13 @@ class AndorBase(SDK3Camera):
 #             time.sleep(.0005)
 #             #self.fLog.flush()
 #         #self.fLog.close()
-#
+
 #     #PYME Camera interface functions - make this look like the other cameras
 #     def ExpReady(self):
 #         #self._pollBuffer()
 #
 #         return not self.fullBuffers.empty()
-#
+
 #     def ExtractColor(self, chSlice, mode):
 #         #grab our buffer from the full buffers list
 #         buf = self.fullBuffers.get()
@@ -528,7 +534,6 @@ class AndorBase(SDK3Camera):
 #
 #         #recycle buffer
 #         self._queueBuffer(buf)
-#
 
     def resetCam(self):
         '''
@@ -593,7 +598,6 @@ class AndorBase(SDK3Camera):
         self.curCropMode = mode # TODO: implement arbitrary cropMode
         self.setCrop(croppingModesSizes[croppingModes[mode]])
 
-
     def setCrop(self, cropSize, binning = '1x1'):
         '''
         Changes the AOI in the camera.
@@ -630,6 +634,9 @@ class AndorBase(SDK3Camera):
         # update width and height values
         self.width = self.AOIWidth.getValue()
         self.height = self.AOIHeight.getValue()
+        
+        # reallocate memory
+        self.allocMemory()
 
     def getCropMode(self):
         return self.curCropMode
@@ -726,14 +733,13 @@ class AndorBase(SDK3Camera):
         print 'Shutting down sCMOS camera'
         self.pollLoopActive = False ## TODO: remove this
         self.shutdown()
-        #pass
-#
+
 #     def GetStatus(*args):
 #         pass
-#
+
 #     def SetCOC(*args):
 #         pass
-#
+
 #     def StartExposure(self):
 #         #make sure no acquisiton is running
 #         self.StopAq()
@@ -746,23 +752,22 @@ class AndorBase(SDK3Camera):
 #         self.AcquisitionStart()
 #
 #         return 0
-#
+
 #     def StopAq(self):
 #         if self.CameraAcquiring.getValue():
 #             self.AcquisitionStop()
-#
-#
+
 #     #new fcns for Andor compatibility
 #     def GetNumImsBuffered(self):
 #         return self.nFull
-#
+
 #     def GetBufferSize(self):
 #         return self.nBuffers
-#
+
 #     def SetActive(self, active=True):
 #         '''flag the camera as active (or inactive) to dictate whether it writes it's metadata or not'''
 #         self.active = active
-#
+
 #     def GenStartMetadata(self, mdh):
 #         if self.active:
 #             self.GetStatus()
@@ -801,25 +806,25 @@ class AndorBase(SDK3Camera):
 #             print varfn
 #             if os.path.exists(varfn):
 #                 mdh['Camera.VarianceMapID'] = varfn
-#
+
 #     #functions to make us look more like andor camera
 #     def GetEMGain(self):
 #         return 1
-#
+
 #     def GetCCDTempSetPoint(self):
 #         return self.TargetSensorTemperature.getValue()
-#
+
 #     def SetCCDTemp(self, temp):
 #         self.TargetSensorTemperature.setValue(temp)
 #         #pass
-#
+
 #     def SetEMGain(self, gain):
 #         pass
-#
+
 #     def SetAcquisitionMode(self, aqMode):
 #         self.CycleMode.setIndex(aqMode)
 #         self.contMode = aqMode == self.MODE_CONTINUOUS
-#
+
 #     def SetBurst(self, burstSize):
 #         if burstSize > 1:
 #             self.SetAcquisitionMode(self.MODE_SINGLE_SHOT)
@@ -830,17 +835,17 @@ class AndorBase(SDK3Camera):
 #             self.FrameCount.setValue(1)
 #             self.SetAcquisitionMode(self.MODE_CONTINUOUS)
 #             self.burstMode = False
-#
+
 #     def SetShutter(self, mode):
 #         pass
-#
+
 #     def SetBaselineClamp(self, mode):
 #         pass
-#
+
 #     def GetFPS(self):
 #         #return self.FrameRate.getValue()
 #         return self._frameRate
-#
+
     def __del__(self):
         self.Shutdown()
         #self.compT.kill = True
@@ -916,6 +921,12 @@ class AndorZyla(AndorBase):
 
 
     # Define Zyla specific methods
+    
+    def getAccumulateCount(self):
+        return self.AccumulateCount.getValue()
+    
+    def setAccumulateCount(self, nrOfFrames = 1):
+        self.AccumulateCount.setValue(nrOfFrames)
 
     def getReadoutTime(self):
         '''

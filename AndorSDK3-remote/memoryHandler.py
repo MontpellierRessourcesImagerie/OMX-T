@@ -103,24 +103,28 @@ class MemoryHandler():
             raise RuntimeError('Returned buffer not equal to expected buffer')
         else: 
             # Buffers are correct
+            # Make a new np array using the provided buffer but shaping the array correctly
             tempImageArray = np.ndarray(shape=[imageWidth, imageHeight], 
                                         dtype='uint16', 
                                         strides=[2, strides], 
                                         buffer=imageBuffer)
-            # Copy the immageArray
+            
+            # Copy the np Array into a fresh array that will be returned
             imageArray = np.copy(tempImageArray)
-            del tempImageArray
             
             # Re-zero data in the buffer
-            imageArray[:] = 0
+            tempImageArray[:] = 0
             
             # requeue the buffer
             self.buffersQueue.put(imageBuffer)
             
             # requeue to andors buffer
             SDK3.QueueBuffer(self.handle, 
-                             imageArray.ctypes.data_as(SDK3.POINTER(SDK3.AT_U8)), 
+                             tempImageArray.ctypes.data_as(SDK3.POINTER(SDK3.AT_U8)), 
                              imageBytes)
+            
+            # delete the temporary array
+            del tempImageArray
             
         return imageArray
 
