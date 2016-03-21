@@ -48,12 +48,12 @@ CAMERA_NUMBER = 0
 MEMORY_ALLOCATION = 500
 
 # Cropping modes
-croppingModes = (CROP_FULL,     # 0
-                 CROP_1024,     # 1
-                 CROP_512,      # 2
-                 CROP_256,      # 3
-                 CROP_128,      # 4
-                 CROP_ARBITRARY # 5
+croppingModes = ('CROP_FULL',     # 0
+                 'CROP_1024',     # 1
+                 'CROP_512',      # 2
+                 'CROP_256',      # 3
+                 'CROP_128',      # 4
+                 'CROP_ARBITRARY' # 5
                  )
 
 croppingModesSizes = {'CROP_FULL': (2048,2048), # TODO: implement this depending on camera model
@@ -973,19 +973,19 @@ class AndorSim(AndorBase):
 
         AndorBase.__init__(self,camNum)
 
-
-try:
-    cam = AndorZyla(camNum = CAMERA_NUMBER)
-    daemon = Pyro4.Daemon(port = 7000, host = MY_IP_ADDRESS)
-    Pyro4.Daemon.serveSimple(
-        {
-            cam: 'Andorcam',
-        },
-        daemon = daemon, ns = False, verbose = True
-    )
-
-except Exception, e:
-    traceback.print_exc()
-
-# Clean up after ourselves.
-# TODO: add some del's to clean up
+if __name__ == '__main__':
+    try:
+        cam = AndorZyla(camNum = CAMERA_NUMBER)
+        daemon = Pyro4.Daemon(port = 7000, host = MY_IP_ADDRESS)
+        Pyro4.Daemon.serveSimple(
+            {
+                cam: 'Andorcam',
+            },
+            daemon = daemon, ns = False, verbose = True
+        )
+    
+    except Exception, e:
+        traceback.print_exc()
+    
+    # Clean up after ourselves.
+    # TODO: add some del's to clean up

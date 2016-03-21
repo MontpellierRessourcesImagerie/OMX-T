@@ -3,7 +3,7 @@ A very basic module to test the Zyla camera
 '''
 from AndorZyla import AndorBase, AndorZyla
 from __builtin__ import str
-import memoryHandler
+#import memoryHandler
 
 print('Importing cameras...')
 
