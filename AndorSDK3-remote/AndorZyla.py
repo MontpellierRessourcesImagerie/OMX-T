@@ -39,7 +39,7 @@ import memoryHandler
 ## Some configuration parameters
 
 # Needed to keep the daemon from only listening to requests originating from the local host.
-MY_IP_ADDRESS = '195.83.85.176'
+MY_IP_ADDRESS = '10.90.90.22'
 
 # CameraNumber is by default 0, the first non sumulated camera
 CAMERA_NUMBER = 0
