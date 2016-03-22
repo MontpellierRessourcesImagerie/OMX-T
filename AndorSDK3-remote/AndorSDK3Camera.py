@@ -154,7 +154,7 @@ class SDK3Camera(object):
     def shutdown(self):
         SDK3.Close(self.handle)
         SDK3.FinaliseLibrary()
-        print('Camera Cloed and Andor library finalized.')
+        print('Camera Closed and Andor library finalized.')
         #camReg.unregCamera() ## TODO: do we have to unregister?
 
 

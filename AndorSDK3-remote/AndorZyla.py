@@ -39,7 +39,7 @@ import memoryHandler
 ## Some configuration parameters
 
 # Needed to keep the daemon from only listening to requests originating from the local host.
-MY_IP_ADDRESS = '10.0.0.2'
+MY_IP_ADDRESS = '195.83.85.176'
 
 # CameraNumber is by default 0, the first non sumulated camera
 CAMERA_NUMBER = 0
@@ -63,6 +63,10 @@ croppingModesSizes = {'CROP_FULL': (2048,2048), # TODO: implement this depending
                       'CROP_128': (128,128),
                       'CROP_ARBITRARY': (2048,2048)
                       }
+
+# Binning modes
+BINNING_MODES = (u'1x1', u'2x2', u'3x3', u'4x4', u'8x8')
+BINNING_VALUES = (1, 2, 3, 4, 8)
 
 # Trigger modes
 (TRIGGER_INTERNAL, TRIGGER_SOFTWARE, TRIGGER_EXTERNAL, TRIGGER_EXTERNAL_START, TRIGGER_EXTERNAL_EXPOSURE) = range(5)
@@ -126,7 +130,8 @@ class DataThread(threading.Thread):
             # \todo This timestamp is potentially bogus if we get behind in
             # processing images.
             timestamp = time.clock() + self.initialTimestamp
-#            print "Image has shape",image.shape,"min/max",image.min(),image.max()
+            if image:
+                print "Image has shape",image.shape,"min/max",image.min(),image.max()
             start = time.clock()
             image = self.fixImage(image)
             fixTime += time.clock() - start
@@ -273,7 +278,7 @@ class AndorBase(SDK3Camera):
         self.height = self.AOIHeight.getValue()
 
         self.SensorCooling.setValue(True)
-        self.setCropMode(2)
+#         self.setCropMode(2)
 
 
         # Print some of the camera infos
@@ -287,11 +292,9 @@ class AndorBase(SDK3Camera):
         print('Sensor temperature: ' + str(self.SensorTemperature.getValue()))
 
         # Create a memoryHandler instance to manage the camera buffers
-
-        self.memoryHandler = memoryHandler.MemoryHandler(self, self.handle)
+        self.memoryHandler = memoryHandler.MemoryHandler(self.handle)
 
         # Create a DataThread instance to manage the images transfer to the client
-
         self.dataThread = DataThread(self, self.width, self.height)
 
         self.dataThread.start()
@@ -587,7 +590,7 @@ class AndorBase(SDK3Camera):
         '''
         return self.ExposureTime.min()
 
-    def setCropMode(selfself, mode):
+    def setCropMode(self, mode):
         '''
         Previously setCrop. Set the cropping mode to one of a few presets.
         In version 2 of the SDK, these were the only valid crop modes; in
@@ -598,7 +601,7 @@ class AndorBase(SDK3Camera):
         self.curCropMode = mode # TODO: implement arbitrary cropMode
         self.setCrop(croppingModesSizes[croppingModes[mode]])
 
-    def setCrop(self, cropSize, binning = '1x1'):
+    def setCrop(self, cropSize, binning = 0):
         '''
         Changes the AOI in the camera.
 
@@ -607,28 +610,27 @@ class AndorBase(SDK3Camera):
         AOI will be centered in the camera
         '''
         # cropSize must be converted into superpixel size in case there is binning
-        binningDict = {'1x1': 1, '2x2': 2, '3x3': 3, '4x4': 4, '8x8': 8}
         binnedCropSize = cropSize
-        if binning != '1x1':
-            binnedCropSize[0] = cropSize[0] // binningDict[binning]
-            binnedCropSize[1] = cropSize[1] // binningDict[binning]
-
+        if binning != 0:
+            binnedCropSize[0] = cropSize[0] // BINNING_VALUES[binning]
+            binnedCropSize[1] = cropSize[1] // BINNING_VALUES[binning]
+            
         self.setCropArbitrary(binnedCropSize[0],
                               ((self.CCDWidth - cropSize[0]) // 2) + 1,
                               binnedCropSize[1],
                               ((self.CCDHeight - cropSize[1]) // 2) + 1,
-                              binning
+                              binning,
                               )
 
-    def setCropArbitrary(self, width, left, height, top, binning = '1x1'):
+    def setCropArbitrary(self, width, left, height, top, binning = u'1x1'):
 
         # Set the binning
-        self.AOIBinning.setString(binning)
-
+        self.AOIBinning.setIndex(binning)
+  
         # Set AOI
         self.AOIWidth.setValue(width)
         self.AOILeft.setValue(left)
-        self.AOIHeight.setValue(heigth)
+        self.AOIHeight.setValue(height)
         self.AOITop.setValue(top)
 
         # update width and height values
@@ -908,10 +910,10 @@ class AndorZyla(AndorBase):
     def Init(self):
         AndorBase.Init(self)
 
-        print('Bit depth: ' + str(self.BitDepth))
+        print('Bit depth: ' + self.BitDepth.getString())
         print('Temperature status: ' + self.getTemperatureStatus())
-        print('FirmwareVersion: ' + self.FirmwareVersion.getString())
-        print('Baseline level: ' + str(self.Baseline.getValue))
+        print('FirmwareVersion: ' + self.FirmwareVersion.getValue())
+        print('Baseline level: ' + str(self.Baseline.getValue()))
 
         # Configure default camera status
 
