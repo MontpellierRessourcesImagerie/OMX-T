@@ -27,8 +27,7 @@ import numpy as np
 import threading
 import Queue
 import Pyro4
-print(Pyro4.config.SERIALIZER) # TODO: remove
-# Config Pyro4 to use Pickle as serializer
+# Config Pyro4 to use pickle as serializer
 Pyro4.config.SERIALIZERS_ACCEPTED.add('pickle')
 Pyro4.config.SERIALIZERS_ACCEPTED.remove('serpent')
 Pyro4.config.SERIALIZER = 'pickle'
@@ -241,8 +240,6 @@ class AndorBase(SDK3Camera):
         self.FrameRate = ATFloat() # Configures the frame rate in Hz at which each image is acquired during any acquisition sequence. This is the rate at which frames are acquired by the camera which may be different from the rate at which frames are delivered to the user. For example when AccumulateCount has a value other than 1, the apparent frame rate will decrease proportionally.
         self.SensorTemperature = ATFloat() # Read the current temperature of the sensor.
 
-        SDK3Camera.__init__(self, camNum)
-
         # Set the cropMode
         self.curCropMode = 0
 
@@ -271,7 +268,8 @@ class AndorBase(SDK3Camera):
 #         #register as a provider of metadata
 #         MetaDataHandler.provideStartMetadata.append(self.GenStartMetadata)
 
-    def Init(self):
+        # Initialize the camera
+        SDK3Camera.__init__(self, camNum)        
         SDK3Camera.Init(self)
 
         # cache some properties that we have to access regularly.
@@ -283,7 +281,7 @@ class AndorBase(SDK3Camera):
         self.height = self.AOIHeight.getValue()
 
         self.SensorCooling.setValue(True)
-#         self.setCropMode(2)
+#         self.setCrop(2)
 
 
         # Print some of the camera infos
@@ -556,7 +554,7 @@ class AndorBase(SDK3Camera):
         self.TriggerMode.setIndex(triggerMode)
 
         # Start the acquisition with external triggers
-        if 1 < triggerMode:
+        if triggerMode != 0:
             self.AcquisitionStart()
 
     def getTrigger(self):
@@ -595,18 +593,18 @@ class AndorBase(SDK3Camera):
         '''
         return self.ExposureTime.min()
 
-    def setCropMode(self, mode):
+    def setCrop(self, mode):
         '''
-        Previously setCrop. Set the cropping mode to one of a few presets.
+        Set the cropping mode to one of a few presets.
         In version 2 of the SDK, these were the only valid crop modes; in
         version 3, we can set any crop mode we want, but these
         presets are still convenient.
         mode is an integer.
         '''
         self.curCropMode = mode # TODO: implement arbitrary cropMode
-        self.setCrop(croppingModesSizes[croppingModes[mode]])
+        self.setCropSize(croppingModesSizes[croppingModes[mode]])
 
-    def setCrop(self, cropSize, binning = 0):
+    def setCropSize(self, cropSize, binning = 0):
         '''
         Changes the AOI in the camera.
 
