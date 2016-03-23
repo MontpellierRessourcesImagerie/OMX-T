@@ -27,6 +27,11 @@ import numpy as np
 import threading
 import Queue
 import Pyro4
+print(Pyro4.config.SERIALIZER) # TODO: remove
+# Config Pyro4 to use Pickle as serializer
+Pyro4.config.SERIALIZERS_ACCEPTED.add('pickle')
+Pyro4.config.SERIALIZERS_ACCEPTED.remove('serpent')
+Pyro4.config.SERIALIZER = 'pickle'
 import time
 import traceback
 import gc
