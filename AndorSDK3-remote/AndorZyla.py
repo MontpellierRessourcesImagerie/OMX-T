@@ -394,6 +394,21 @@ class AndorBase(SDK3Camera):
                 # queue is empty, so we're all done here.
                 return
 
+    def resetCam(func):
+        '''
+        Decorator function to put the camera in a mode where it can be
+        interacted with. Mostly needed to stop acquisitions.
+        '''
+        def wrappedFunc(*args, **kwargs):
+            if self.CameraAcquiring.getValue():
+                self.AcuisitionStop()
+            self.TriggerMode.setString(u'Internal')
+            self.CycleMode.setString(u'Fixed')
+            self.FrameCount.setValue(1)
+            func(*args, **kwargs)
+        return wrappedFunc
+
+
 
         #set some initial parameters
         #self.FrameCount.setValue(1)
@@ -547,6 +562,7 @@ class AndorBase(SDK3Camera):
         '''
         pass # TODO: implement this
 
+    @self.resetCam
     def setTrigger(self, triggerMode):
         '''
         Changes the triggering mode of the camera
@@ -556,7 +572,7 @@ class AndorBase(SDK3Camera):
         # Start the acquisition with external triggers
         if triggerMode != 0:
             self.AcquisitionStart()
-
+            
     def getTrigger(self):
         '''
         Returns the triggering mode of the camera
@@ -575,6 +591,7 @@ class AndorBase(SDK3Camera):
         '''
         return self.ElectronicShutteringMode.getIndex()
 
+    @self.resetCam
     def setExposureTime(self, time):
         '''
         Changes the exposure time in the camera. In seconds
