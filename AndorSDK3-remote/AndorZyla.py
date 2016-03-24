@@ -394,19 +394,16 @@ class AndorBase(SDK3Camera):
                 # queue is empty, so we're all done here.
                 return
 
-    def resetCam(func):
+    def resetCam(self):
         '''
-        Decorator function to put the camera in a mode where it can be
+        Method to put the camera in a mode where it can be
         interacted with. Mostly needed to stop acquisitions.
         '''
-        def wrappedFunc(*args, **kwargs):
-            if self.CameraAcquiring.getValue():
-                self.AcuisitionStop()
-            self.TriggerMode.setString(u'Internal')
-            self.CycleMode.setString(u'Fixed')
-            self.FrameCount.setValue(1)
-            func(*args, **kwargs)
-        return wrappedFunc
+        if self.CameraAcquiring.getValue():
+            self.AcuisitionStop()
+        self.TriggerMode.setString(u'Internal')
+        self.CycleMode.setString(u'Fixed')
+        self.FrameCount.setValue(1)
 
 
 
@@ -556,22 +553,22 @@ class AndorBase(SDK3Camera):
 #         #recycle buffer
 #         self._queueBuffer(buf)
 
-    def resetCam(self):
-        '''
-        Resets the camera
-        '''
-        pass # TODO: implement this
-
-    @self.resetCam
     def setTrigger(self, triggerMode):
         '''
         Changes the triggering mode of the camera
         '''
+        self.resetCam()
+        
+        print('camera reseted')
+        
         self.TriggerMode.setIndex(triggerMode)
+        
+        print 'trigger changed to: ', str(triggerMode)
 
         # Start the acquisition with external triggers
-        if triggerMode != 0:
-            self.AcquisitionStart()
+#         if triggerMode() != 0:
+#             self.AcquisitionStart()
+#             print 'Acquisition restarted'
             
     def getTrigger(self):
         '''
@@ -591,12 +588,17 @@ class AndorBase(SDK3Camera):
         '''
         return self.ElectronicShutteringMode.getIndex()
 
-    @self.resetCam
     def setExposureTime(self, time):
         '''
         Changes the exposure time in the camera. In seconds
         '''
-        self.ExposureTime.setValue(time) # TODO: Impleent with a reset?
+        self.resetCam()
+        
+        self.ExposureTime.setValue(time)
+        
+        # Start the acquisition with external triggers
+        if self.getTrigger() != 0:
+            self.AcquisitionStart()
 
     def getExposureTime(self):
         '''
@@ -642,7 +644,7 @@ class AndorBase(SDK3Camera):
                               binning,
                               )
 
-    def setCropArbitrary(self, width, left, height, top, binning = u'1x1'):
+    def setCropArbitrary(self, width, left, height, top, binning = 0):
 
         # Set the binning
         self.AOIBinning.setIndex(binning)
@@ -654,11 +656,18 @@ class AndorBase(SDK3Camera):
         self.AOITop.setValue(top)
 
         # update width and height values
-        self.width = self.AOIWidth.getValue()
-        self.height = self.AOIHeight.getValue()
+        self.width = width
+        self.height = height
+        self.dataThread.setImageDimensions(width, height)
         
         # reallocate memory
         self.allocMemory()
+        
+        # TODO: understand this
+        stride = self.getStrides()
+        div = float(stride) / width
+        print "Got stride ",stride,"compare ",width,"giving div ",div
+        return (stride, width, int(div) == div)
 
     def getCropMode(self):
         return self.curCropMode
