@@ -87,7 +87,8 @@ class MemoryHandler():
         except SDK3.TimeoutError as e:
             # Both AT_ERR_TIMEDOUT and AT_ERR_NODATA get caught as TimeoutErrors
             if e.errNo == SDK3.AT_ERR_TIMEDOUT:
-                print('Timeout error') # TODO: add up log error report
+#                 print('Timeout error') # TODO: add up log error report
+                pass
             return
         except SDK3.CameraError as e:
             if not e.errNo == SDK3.AT_ERR_NODATA:
